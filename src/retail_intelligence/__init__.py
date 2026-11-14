@@ -1,0 +1,1 @@
+"""Distributed retail intelligence foundation."""

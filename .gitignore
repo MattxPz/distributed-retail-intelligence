@@ -21,3 +21,7 @@ artifacts/
 models/
 docs/progress.md
 AGENTS.md
+# Artefactos de empaquetado
+build/
+dist/
+*.egg-info/

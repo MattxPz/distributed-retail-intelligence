@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+  central:
+    image: distributed-retail-intelligence-central:0.1.0
+    build: .
+    command: uvicorn retail_intelligence.central.app:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports: ["127.0.0.1:8000:8000"]
+  branch-1: &branch
+    image: distributed-retail-intelligence-branch:0.1.0
+    build: .
+    command: uvicorn retail_intelligence.branch.app:app --host 0.0.0.0 --port 8000 --workers 1
+    environment:
+      BRANCH_ID: "1"
+      DATABASE_URL: sqlite:////data/branch-1.sqlite3
+    volumes: ["branch-1-data:/data"]
+    ports: ["127.0.0.1:8001:8000"]
+  branch-2:
+    <<: *branch
+    environment:
+      BRANCH_ID: "2"
+      DATABASE_URL: sqlite:////data/branch-2.sqlite3
+    volumes: ["branch-2-data:/data"]
+    ports: ["127.0.0.1:8002:8000"]
+  branch-3:
+    <<: *branch
+    environment:
+      BRANCH_ID: "3"
+      DATABASE_URL: sqlite:////data/branch-3.sqlite3
+    volumes: ["branch-3-data:/data"]
+    ports: ["127.0.0.1:8003:8000"]
+  dashboard:
+    image: distributed-retail-intelligence-dashboard:0.1.0
+    build: .
+    command: streamlit run src/retail_intelligence/dashboard/app.py --server.address 0.0.0.0 --server.port 8501
+    environment:
+      CENTRAL_URL: http://central:8000
+      BRANCH_1_URL: http://branch-1:8000
+      BRANCH_2_URL: http://branch-2:8000
+      BRANCH_3_URL: http://branch-3:8000
+    ports: ["127.0.0.1:8501:8501"]
+volumes:
+  postgres-data:
+  branch-1-data:
+  branch-2-data:
+  branch-3-data:

@@ -66,3 +66,7 @@ README.md
 3. Sincronización: snapshot inicial versionado, orden y recuperación de huecos; reintentos y deduplicación persistente y atómica, comprobados ante duplicados y desconexiones.
 4. Pronóstico y panel: comparación temporal sin fuga de información y visualización de datos disponibles.
 5. Integración: Compose y comprobaciones automatizadas de los flujos y fallos relevantes. El orden y alcance detallado de las etapas posteriores se concretarán en sus instrucciones.
+
+## Base ejecutable actual
+
+Las API exponen vida del proceso y readiness mediante una consulta SELECT 1 a la base configurada; esta comprobación no certifica migraciones ni datos de negocio. Compose asigna un volumen SQLite independiente por sucursal y uno a PostgreSQL. Las URLs entre contenedores usan nombres de servicio; los puertos del host se limitan a 127.0.0.1. Cada sucursal ejecuta un único worker. El publicador aún no existe: al implementarlo se ejecutará en ese proceso único por sucursal, sin réplicas ni workers adicionales hasta disponer de coordinación segura. Ventas, outbox, migraciones, sincronización y pronósticos siguen pendientes.
