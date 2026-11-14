@@ -14,7 +14,9 @@ services:
       retries: 12
   central:
     image: distributed-retail-intelligence-central:0.1.0
-    build: .
+    build:
+      context: .
+      target: runtime
     command: uvicorn retail_intelligence.central.app:app --host 0.0.0.0 --port 8000
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -24,7 +26,9 @@ services:
     ports: ["127.0.0.1:8000:8000"]
   branch-1: &branch
     image: distributed-retail-intelligence-branch:0.1.0
-    build: .
+    build:
+      context: .
+      target: runtime
     command: uvicorn retail_intelligence.branch.app:app --host 0.0.0.0 --port 8000 --workers 1
     environment:
       BRANCH_ID: "1"
@@ -47,7 +51,9 @@ services:
     ports: ["127.0.0.1:8003:8000"]
   dashboard:
     image: distributed-retail-intelligence-dashboard:0.1.0
-    build: .
+    build:
+      context: .
+      target: runtime
     command: streamlit run src/retail_intelligence/dashboard/app.py --server.address 0.0.0.0 --server.port 8501
     environment:
       CENTRAL_URL: http://central:8000

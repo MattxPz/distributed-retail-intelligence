@@ -4,16 +4,18 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
+from retail_intelligence.shared.bootstrap import initialize
 from retail_intelligence.shared.config import CentralSettings
 from retail_intelligence.shared.health import check_readiness, database_engine
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = CentralSettings()  # type: ignore[call-arg]
     with database_engine(settings.database_url) as engine:
+        initialize(engine, "central")
         app.state.engine = engine
         logger.info("Central started")
         yield

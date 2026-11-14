@@ -1,0 +1,25 @@
+name: dri-persistence-tests
+services:
+  postgres-test:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test_only_ephemeral
+      POSTGRES_DB: retail_test
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d retail_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+  tests:
+    image: distributed-retail-intelligence-tests:0.1.0
+    build:
+      context: .
+      target: test
+    environment:
+      TEST_POSTGRES_URL: postgresql+psycopg://test:test_only_ephemeral@postgres-test:5432/retail_test
+    depends_on:
+      postgres-test:
+        condition: service_healthy

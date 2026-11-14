@@ -1,13 +1,13 @@
 # Arquitectura prevista
 
-Esta es una propuesta para etapas posteriores, no una descripción de componentes ya implementados. El MVP simulará tres sucursales y diez productos, con inventario inicial, ventas, sincronización y pronóstico. Quedan fuera pagos, devoluciones y transferencias.
+Esta es una propuesta para etapas posteriores, no una descripciÃ³n de componentes ya implementados. El MVP simularÃ¡ tres sucursales y diez productos, con inventario inicial, ventas, sincronizaciÃ³n y pronÃ³stico. Quedan fuera pagos, devoluciones y transferencias.
 
 ## Componentes y propiedad de datos
 
-- Un monorepositorio Python 3.12: FastAPI para las API, SQLAlchemy 2 y Alembic para persistencia y migraciones. Cada sucursal tendrá su propia base SQLite; PostgreSQL 17 almacenará el estado central.
+- Un monorepositorio Python 3.12: FastAPI para las API, SQLAlchemy 2 y Alembic para persistencia y migraciones. Cada sucursal tendrÃ¡ su propia base SQLite; PostgreSQL 17 almacenarÃ¡ el estado central.
 - Cada sucursal es autoridad exclusiva de su stock y valida ventas localmente. El central conserva proyecciones eventualmente consistentes y no autoriza ventas locales.
-- HTTPX enviará eventos; Streamlit y Plotly presentarán el panel. pandas y scikit-learn servirán al análisis y pronóstico. `uv` gestionará el entorno; pytest, Ruff y mypy verificarán el proyecto. Las versiones compatibles se resolverán y bloquearán al crear el entorno.
-- Docker Compose ejecutará tres instancias de sucursal, central, PostgreSQL y panel. Desconectar una sucursal significará bloquear únicamente la comunicación de sincronización: su API y su base local seguirán activas.
+- HTTPX enviarÃ¡ eventos; Streamlit y Plotly presentarÃ¡n el panel. pandas y scikit-learn servirÃ¡n al anÃ¡lisis y pronÃ³stico. `uv` gestionarÃ¡ el entorno; pytest, Ruff y mypy verificarÃ¡n el proyecto. Las versiones compatibles se resolverÃ¡n y bloquearÃ¡n al crear el entorno.
+- Docker Compose ejecutarÃ¡ tres instancias de sucursal, central, PostgreSQL y panel. Desconectar una sucursal significarÃ¡ bloquear Ãºnicamente la comunicaciÃ³n de sincronizaciÃ³n: su API y su base local seguirÃ¡n activas.
 
 ```mermaid
 flowchart LR
@@ -16,24 +16,24 @@ flowchart LR
   B3[Sucursal 3: API + SQLite] -->|outbox HTTP| C
   C --> P[(PostgreSQL 17)]
   D[Panel Streamlit] --> C
-  F[Pronóstico] --> C
+  F[PronÃ³stico] --> C
 ```
 
 ## Transacciones y contrato de eventos
 
-Una venta válida, su descuento de inventario y la inserción del evento en la outbox se confirmarán en una sola transacción local. Una operación fallida no dejará efectos parciales; se impedirá vender más unidades que las disponibles. El dinero se representará en centavos enteros y las cantidades vendidas en unidades enteras positivas. Las fechas de eventos serán UTC; la fecha comercial se determinará en `America/Guayaquil`.
+Una venta vÃ¡lida, su descuento de inventario y la inserciÃ³n del evento en la outbox se confirmarÃ¡n en una sola transacciÃ³n local. Una operaciÃ³n fallida no dejarÃ¡ efectos parciales; se impedirÃ¡ vender mÃ¡s unidades que las disponibles. El dinero se representarÃ¡ en centavos enteros y las cantidades vendidas en unidades enteras positivas. Las fechas de eventos serÃ¡n UTC; la fecha comercial se determinarÃ¡ en `America/Guayaquil`.
 
-Cada evento tendrá al menos identificador único, versión de esquema, identificador de sucursal, secuencia monotónica por sucursal, tipo, fecha UTC y carga útil. Los movimientos identificarán el producto, la venta y el cambio de unidades. La secuencia se asignará de forma transaccional con la outbox. El envío HTTP será **al menos una vez** y podrá repetir eventos; no se promete entrega exactly-once. El central registrará persistentemente cada identificador y aplicará sus efectos en una misma transacción. Una repetición idéntica se reconocerá sin aplicar de nuevo; una colisión de identificador con contenido distinto se rechazará y señalará.
+Cada evento tendrÃ¡ al menos identificador Ãºnico, versiÃ³n de esquema, identificador de sucursal, secuencia monotÃ³nica por sucursal, tipo, fecha UTC y carga Ãºtil. Los movimientos identificarÃ¡n el producto, la venta y el cambio de unidades. La secuencia se asignarÃ¡ de forma transaccional con la outbox. El envÃ­o HTTP serÃ¡ **al menos una vez** y podrÃ¡ repetir eventos; no se promete entrega exactly-once. El central registrarÃ¡ persistentemente cada identificador y aplicarÃ¡ sus efectos en una misma transacciÃ³n. Una repeticiÃ³n idÃ©ntica se reconocerÃ¡ sin aplicar de nuevo; una colisiÃ³n de identificador con contenido distinto se rechazarÃ¡ y seÃ±alarÃ¡.
 
-El inventario central comenzará con un snapshot inicial versionado por sucursal, que incluye su secuencia de corte y existencias por producto. Solo se aplicarán movimientos posteriores a ese corte, en orden de secuencia por sucursal. El central persistirá el último número aplicado; ante un hueco no avanzará ni aplicará eventos posteriores de esa sucursal hasta recuperar los faltantes. Un snapshot antiguo o igual no sobrescribirá stock más reciente; uno nuevo solo se aceptará mediante un procedimiento explícito de reconciliación que verifique su versión y corte, y preserve o reaplique los movimientos posteriores. El protocolo concreto y la recuperación de huecos se implementarán y probarán en etapas posteriores.
+El inventario central comenzarÃ¡ con un snapshot inicial versionado por sucursal, que incluye su secuencia de corte y existencias por producto. Solo se aplicarÃ¡n movimientos posteriores a ese corte, en orden de secuencia por sucursal. El central persistirÃ¡ el Ãºltimo nÃºmero aplicado; ante un hueco no avanzarÃ¡ ni aplicarÃ¡ eventos posteriores de esa sucursal hasta recuperar los faltantes. Un snapshot antiguo o igual no sobrescribirÃ¡ stock mÃ¡s reciente; uno nuevo solo se aceptarÃ¡ mediante un procedimiento explÃ­cito de reconciliaciÃ³n que verifique su versiÃ³n y corte, y preserve o reaplique los movimientos posteriores. El protocolo concreto y la recuperaciÃ³n de huecos se implementarÃ¡n y probarÃ¡n en etapas posteriores.
 
-## Errores y recuperación
+## Errores y recuperaciÃ³n
 
-Errores de validación o stock insuficiente rechazarán la venta sin efectos parciales. Fallos de red o del central conservarán la outbox pendiente para reintento; un acuse solo marcará enviado el evento confirmado por el central. Errores transitorios serán reintentables; esquemas inválidos, conflictos de identidad y huecos se registrarán y expondrán para diagnóstico sin descartar datos silenciosamente. La implementación definirá límites y política de reintentos.
+Errores de validaciÃ³n o stock insuficiente rechazarÃ¡n la venta sin efectos parciales. Fallos de red o del central conservarÃ¡n la outbox pendiente para reintento; un acuse solo marcarÃ¡ enviado el evento confirmado por el central. Errores transitorios serÃ¡n reintentables; esquemas invÃ¡lidos, conflictos de identidad y huecos se registrarÃ¡n y expondrÃ¡n para diagnÃ³stico sin descartar datos silenciosamente. La implementaciÃ³n definirÃ¡ lÃ­mites y polÃ­tica de reintentos.
 
-## Pronóstico
+## PronÃ³stico
 
-Se comparará un promedio histórico con Ridge usando separación temporal de entrenamiento, validación y prueba. Las características y transformaciones se ajustarán solo con información disponible hasta cada corte, sin datos futuros. Las métricas y resultados se definirán y medirán al implementar, sin anticiparlos.
+Se compararÃ¡ un promedio histÃ³rico con Ridge usando separaciÃ³n temporal de entrenamiento, validaciÃ³n y prueba. Las caracterÃ­sticas y transformaciones se ajustarÃ¡n solo con informaciÃ³n disponible hasta cada corte, sin datos futuros. Las mÃ©tricas y resultados se definirÃ¡n y medirÃ¡n al implementar, sin anticiparlos.
 
 ## Estructura futura
 
@@ -57,16 +57,16 @@ uv.lock
 README.md
 ```
 
-`shared` contendrá contratos y configuración comunes, sin mezclar lógica de negocio. Dentro de cada módulo se separarán rutas, servicios y persistencia cuando tengan responsabilidades reales.
+`shared` contendrÃ¡ contratos y configuraciÃ³n comunes, sin mezclar lÃ³gica de negocio. Dentro de cada mÃ³dulo se separarÃ¡n rutas, servicios y persistencia cuando tengan responsabilidades reales.
 
-## Fases y criterios de aceptación
+## Fases y criterios de aceptaciÃ³n
 
-1. Fundamentos: reglas, exclusiones y documentación inicial; no se requiere aplicación ejecutable.
-2. Aplicación y persistencia: tres sucursales independientes; ventas, descuento de stock y outbox atómicos; pruebas de invariantes y fallos.
-3. Sincronización: snapshot inicial versionado, orden y recuperación de huecos; reintentos y deduplicación persistente y atómica, comprobados ante duplicados y desconexiones.
-4. Pronóstico y panel: comparación temporal sin fuga de información y visualización de datos disponibles.
-5. Integración: Compose y comprobaciones automatizadas de los flujos y fallos relevantes. El orden y alcance detallado de las etapas posteriores se concretarán en sus instrucciones.
+1. Fundamentos: reglas, exclusiones y documentaciÃ³n inicial; no se requiere aplicaciÃ³n ejecutable.
+2. AplicaciÃ³n y persistencia: tres sucursales independientes; ventas, descuento de stock y outbox atÃ³micos; pruebas de invariantes y fallos.
+3. SincronizaciÃ³n: snapshot inicial versionado, orden y recuperaciÃ³n de huecos; reintentos y deduplicaciÃ³n persistente y atÃ³mica, comprobados ante duplicados y desconexiones.
+4. PronÃ³stico y panel: comparaciÃ³n temporal sin fuga de informaciÃ³n y visualizaciÃ³n de datos disponibles.
+5. IntegraciÃ³n: Compose y comprobaciones automatizadas de los flujos y fallos relevantes. El orden y alcance detallado de las etapas posteriores se concretarÃ¡n en sus instrucciones.
 
 ## Base ejecutable actual
 
-Las API exponen vida del proceso y readiness mediante una consulta SELECT 1 a la base configurada; esta comprobación no certifica migraciones ni datos de negocio. Compose asigna un volumen SQLite independiente por sucursal y uno a PostgreSQL. Las URLs entre contenedores usan nombres de servicio; los puertos del host se limitan a 127.0.0.1. Cada sucursal ejecuta un único worker. El publicador aún no existe: al implementarlo se ejecutará en ese proceso único por sucursal, sin réplicas ni workers adicionales hasta disponer de coordinación segura. Ventas, outbox, migraciones, sincronización y pronósticos siguen pendientes.
+Las API exponen vida del proceso y readiness mediante una consulta SELECT 1 a la base configurada; esta comprobaciÃ³n no certifica migraciones ni datos de negocio. Compose asigna un volumen SQLite independiente por sucursal y uno a PostgreSQL. Las URLs entre contenedores usan nombres de servicio; los puertos del host se limitan a 127.0.0.1. Cada sucursal ejecuta un Ãºnico worker. El publicador aÃºn no existe: al implementarlo se ejecutarÃ¡ en ese proceso Ãºnico por sucursal, sin rÃ©plicas ni workers adicionales hasta disponer de coordinaciÃ³n segura. Ventas, outbox, migraciones, sincronizaciÃ³n y pronÃ³sticos siguen pendientes.

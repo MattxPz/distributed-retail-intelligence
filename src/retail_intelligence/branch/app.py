@@ -4,16 +4,18 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
+from retail_intelligence.shared.bootstrap import initialize
 from retail_intelligence.shared.config import BranchSettings
 from retail_intelligence.shared.health import check_readiness, database_engine
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = BranchSettings()  # type: ignore[call-arg]
     with database_engine(settings.database_url) as engine:
+        initialize(engine, "branch", settings.branch_id)
         app.state.engine = engine
         app.state.branch_id = settings.branch_id
         logger.info("Branch %s started", settings.branch_id)

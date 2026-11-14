@@ -34,3 +34,6 @@ files = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"migrations" = "retail_intelligence/migrations"

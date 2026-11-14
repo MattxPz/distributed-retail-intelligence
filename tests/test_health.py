@@ -1,6 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
+from sqlalchemy.exc import OperationalError
 
 from retail_intelligence.branch.app import app as branch_app
 from retail_intelligence.central.app import app as central_app
@@ -25,8 +26,7 @@ def test_branch_rejects_invalid_configuration(monkeypatch):
     assert {item["loc"][0] for item in error.value.errors()} == {"branch_id", "database_url"}
 
 
-def test_central_readiness_reports_database_failure(monkeypatch):
+def test_central_fails_startup_when_database_is_unavailable(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://x:x@127.0.0.1:1/x")
-    with TestClient(central_app) as client:
-        assert client.get("/health/live").status_code == 200
-        assert client.get("/health/ready").status_code == 503
+    with pytest.raises(OperationalError), TestClient(central_app):
+        pass
