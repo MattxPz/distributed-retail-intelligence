@@ -2,7 +2,7 @@
 
 Implementado en esta etapa: esquemas separados SQLAlchemy Core, revisiones Alembic
 `branch_0001` y `central_0001`, inicialización transaccional y proyección del snapshot
-inicial. No existen aún endpoints de ventas ni publicador HTTP de la outbox.
+inicial. Existen endpoints de ventas locales; el publicador HTTP de la outbox sigue pendiente.
 
 ## Propiedad y claves
 
@@ -36,7 +36,7 @@ cambiar sin modificar `unit_price_cents` de líneas ya registradas.
 
 Los eventos se validan en UTC. SQLite almacena los DateTime sin zona como UTC por
 convención; PostgreSQL usa TIMESTAMP WITH TIME ZONE. `business_date` se reserva
-para la fecha calculada en America/Guayaquil al implementar ventas.
+para la fecha calculada en America/Guayaquil al registrar ventas.
 
 ## Modelo local
 
@@ -130,7 +130,7 @@ antiguo nunca restaura existencias descontadas. Se prueban rollback y entregas
 simultáneas. El transporte HTTP y su publicador aún no están implementados: por
 eso el central del proyecto permanece sin stock, con snapshot pendiente local.
 
-Las futuras ventas deben tomar secuencias desde `local_state.next_sequence` (2 en
+Las ventas locales toman secuencias desde `local_state.next_sequence` (2 en
 adelante) en la misma transacción de venta/outbox. El publicador deberá enviar en
 orden y esperar el acuse de la secuencia 1 antes de enviar ventas. El receptor de
 ventas deberá aceptar únicamente `last_sequence + 1`; los huecos no avanzarán el
@@ -162,3 +162,16 @@ conserva los bloqueos; no se ofrece un comando de migración sin esas garantías
 Referencias técnicas: [transacciones SQLite](https://www.sqlite.org/lang_transaction.html),
 [PRAGMA](https://www.sqlite.org/pragma.html) y
 [conexión compartida de Alembic](https://alembic.sqlalchemy.org/en/latest/cookbook.html#sharing-a-connection-across-one-or-more-programmatic-migration-commands).
+
+## Ventas locales
+
+`POST /sales` valida cantidades enteras positivas y producto único por línea.
+Ordena las líneas por producto y calcula SHA-256 sobre el JSON canónico para
+comparar el contenido asociado a cada clave. `BEGIN IMMEDIATE` serializa la
+lectura de la clave y las escrituras. Un `UPDATE` condicional por producto
+descuenta únicamente si hay stock suficiente. Venta, líneas con precio
+histórico, secuencia, evento `sale.created` y clave se confirman juntos; errores
+revierte la transacción. Ante SQLITE_BUSY o SQLITE_LOCKED se reintenta toda la
+operación hasta tres veces con espera progresiva; cada intento respeta el
+`busy_timeout` de cinco segundos. La fecha comercial usa America/Guayaquil y
+el instante de evento es UTC. La outbox permanece pendiente de transporte.

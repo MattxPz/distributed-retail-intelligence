@@ -6,8 +6,7 @@ MVP excluye pagos, devoluciones y transferencias.
 
 Implementado: API de estado, panel, persistencia local/central, migraciones
 separadas Alembic y seed idempotente. Cada sucursal tiene 100 unidades iniciales
-por producto y su snapshot pendiente en outbox. Las tablas de ventas existen,
-pero todavía no hay API de ventas ni publicador HTTP ni pronósticos.
+por producto y su snapshot pendiente en outbox. La API de sucursal registra ventas locales transaccionales; todavía no hay publicador HTTP ni pronósticos.
 
 Consulte [arquitectura](docs/architecture.md), [modelo y seed](docs/data-model.md)
 y [progreso](docs/progress.md).
@@ -93,3 +92,24 @@ El seed central no carga inventario. El servicio interno que aplica snapshots
 está implementado y probado, pero la sincronización por HTTP corresponde a la
 siguiente etapa. El futuro publicador se ejecutará en el único proceso de cada
 sucursal; no se deben aumentar workers ni réplicas sin coordinación adicional.
+
+## Ventas locales
+
+La sucursal expone `GET /products`, `GET /inventory`, `GET /sales` y
+`GET /sales/{sale_id}`. Para vender use `POST /sales`, con la cabecera
+`Idempotency-Key` obligatoria (1 a 200 caracteres) y JSON, por ejemplo:
+
+```json
+{"lines": [{"product_id": 1, "quantity": 2}, {"product_id": 2, "quantity": 1}]}
+```
+
+Cantidades y producto deben ser enteros positivos y no se admiten productos
+repetidos. El servidor calcula el total en centavos con el precio vigente y
+conserva el precio histórico. Repetir la misma clave con las mismas líneas, en
+cualquier orden, devuelve la venta original; contenido diferente produce 409.
+Producto inexistente devuelve 404, stock insuficiente 409 y entrada inválida 422.
+Venta, líneas, descuento, clave y evento se confirman juntos; un fallo revierte
+todos los cambios. Los eventos se guardan en orden después del snapshot inicial.
+Las escrituras SQLite se serializan mediante `BEGIN IMMEDIATE` con espera de
+cinco segundos y hasta tres intentos completos ante bloqueos; si persiste el
+bloqueo se responde 503. La sincronización HTTP sigue pendiente.
