@@ -30,6 +30,7 @@ def pytest_generate_tests(metafunc):
             "test_concurrent_snapshot_delivery": ["central"],
             "test_event_receiver_end_to_end": ["central"],
             "test_http_loss_replay_and_partial_batch": ["central"],
+            "test_operational_forecast_postgres": ["central"],
             "test_local_outbox_is_the_source_of_central_inventory": ["central"],
         }
         metafunc.parametrize(
@@ -490,3 +491,56 @@ def test_http_loss_replay_and_partial_batch(database, tmp_path):
             )
             assert c.scalar(text("SELECT count(*) FROM sales")) == 1
             assert c.scalar(text("SELECT count(*) FROM processed_events")) == 2
+
+
+def test_operational_forecast_postgres(database, tmp_path):
+    from datetime import date
+    from pathlib import Path
+
+    from retail_intelligence.forecasting.datasets import operational_rows
+
+    role, engine = database
+    init(role, engine)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO sales VALUES ('forecast-sale', 1, "
+                "'2026-01-02 02:30:00+00:00', '2026-01-01')"
+            )
+        )
+        connection.execute(text("INSERT INTO sale_lines VALUES ('forecast-sale', 1, 1, 3, 150)"))
+    rows = operational_rows(engine, date(2026, 1, 1), date(2026, 1, 2))
+    observed = [row for row in rows if row["branch_id"] == 1 and row["product_id"] == 1]
+    assert [row["units"] for row in observed] == [3, None]
+    assert not any(row["complete"] for row in rows)
+    with engine.connect() as connection:
+        assert connection.scalar(text("SELECT count(*) FROM sales")) == 1
+        assert connection.scalar(text("SELECT count(*) FROM projected_stock")) == 0
+
+    env = dict(os.environ, DATABASE_URL=engine.url.render_as_string(hide_password=False))
+    command = [
+        sys.executable,
+        "-m",
+        "retail_intelligence.cli",
+        "forecast-prepare",
+        "--source",
+        "operational",
+        "--start-date",
+        "2026-01-01",
+        "--end-date",
+        "2026-01-02",
+        "--output-dir",
+        str(tmp_path / "datasets"),
+    ]
+    first = subprocess.run(command, env=env, capture_output=True, text=True, check=True)
+    second = subprocess.run(command, env=env, capture_output=True, text=True, check=True)
+    assert first.stdout == second.stdout
+    from retail_intelligence.forecasting.datasets import load_dataset
+
+    meta, result = load_dataset(Path(first.stdout.strip()))
+    assert meta["origin"] == "operational"
+    assert meta["coverage_summary"]["unknown_rows"] == 60
+    assert (
+        next(row for row in result if row["branch_id"] == 1 and row["product_id"] == 1)["units"]
+        == 3
+    )

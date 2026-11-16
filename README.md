@@ -183,3 +183,11 @@ La prueba ejecuta la demo dos veces sobre la misma base aislada, comprueba
 cursores, conteos, importes y stock antes y después del reenvío, y verifica la
 recuperación tras el fallo real del proxy. Los servicios de prueba no acceden a
 los volúmenes del proyecto del usuario.
+
+
+## Datos para pronósticos
+
+La generación sintética y la preparación de datos operativos son independientes
+de las ventas e inventarios. Consulte [schema, cobertura y comandos](docs/data.md).
+El fin fijo de la demo es 2026-11-15; la cobertura operativa sin cierre diario
+verificable se marca desconocida, no se rellena con ceros.

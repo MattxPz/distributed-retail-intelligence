@@ -76,3 +76,13 @@ Siguiente etapa: API de ventas transaccionales e idempotencia operativa; posteri
 - Evidencia de la primera ejecución: sucursal 2 pasó de stock 100/ventas 0/total 0 a stock local 98/ventas 2/300 centavos mientras el central seguía en 100/0/0 y había dos pendientes. Tras reiniciar y reanudar, central y sucursal coincidieron en 98/2/300; cuatro eventos reenviados fueron duplicados sin cambiar proyecciones ni cursores. Sucursales 1 y 3 vendieron y sincronizaron una unidad cada una.
 - La segunda ejecución partió de sucursal 2 con stock 97/3 ventas/450 centavos (incluida la venta de la prueba de red) y convergió en 95/5/750. El proxy cerró realmente conexiones HTTP; la sucursal permaneció viva y la venta pendiente convergió al restablecer el transporte.
 - Caso de fallo verificado: sucursal 1 inaccesible y plazo de 0,1 segundos produce salida 1 sin éxito. Ruff, formato y mypy correctos; pytest local: 39 aprobadas, 20 omitidas por requerir PostgreSQL o habilitación e2e, y dos advertencias de deprecación conocidas.
+
+
+## Datos para pronósticos — 2026-11-16
+
+- Generación sintética `synthetic-v1` separada de ventas e inventario: 180 días × 3 sucursales × 10 productos, semilla configurable, estacionalidad semanal, niveles diferenciados y ruido reproducible. Fin fijo de demo 2026-11-15.
+- CLI `forecast-generate`, `forecast-prepare` y `forecast-query`; datasets CSV/JSON direccionados por contenido, inmutables y reutilizados al repetir. `data/generated/`, `models/` y `artifacts/` ya estaban excluidos por `.gitignore`.
+- Ventas operativas se agregan usando fecha comercial America/Guayaquil desde el instante UTC. No se infiere cobertura diaria del cursor: las filas operativas se marcan incompletas; sin observación y sin cobertura verificada, las unidades son desconocidas y no cero. No existe aún fuente operativa de cierres diarios verificables.
+- Ejecución real con semilla 42 y rango 2026-05-20 a 2026-11-15: 5.400 filas, 30 series; volver a preparar produjo el mismo identificador. Datos de verificación quedaron en el área de trabajo temporal, no en bases operativas.
+- Suite con PostgreSQL 17 y SQLite reales: 63 pruebas aprobadas, 1 e2e Docker opcional omitida, dos advertencias de deprecación conocidas. Incluye reproducibilidad, claves, cobertura, frontera UTC/Guayaquil e idempotencia de preparación operativa con PostgreSQL. Ruff, formato y mypy correctos.
+- Documentación de esquema y comandos en docs/data.md. Las ventas durante quiebres de stock no se consideran demanda real.
