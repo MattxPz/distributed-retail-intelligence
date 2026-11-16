@@ -2,7 +2,7 @@
 
 Implementado en esta etapa: esquemas separados SQLAlchemy Core, revisiones Alembic
 `branch_0001` y `central_0001`, inicialización transaccional y proyección del snapshot
-inicial. Existen endpoints de ventas locales; el publicador HTTP de la outbox sigue pendiente.
+inicial. Existen ventas locales, publicador de outbox y receptor HTTP central.
 
 ## Propiedad y claves
 
@@ -127,14 +127,11 @@ cursor en PostgreSQL, y confirma stock, evento procesado y cursor en una sola
 transacción. Un duplicado idéntico es un no-op; un ID reutilizado con contenido
 distinto o un snapshot nuevo sobre un cursor ya avanzado se rechaza. Un duplicado
 antiguo nunca restaura existencias descontadas. Se prueban rollback y entregas
-simultáneas. El transporte HTTP y su publicador aún no están implementados: por
-eso el central del proyecto permanece sin stock, con snapshot pendiente local.
+simultáneas. El publicador transmite el snapshot antes de los movimientos por HTTP.
 
 Las ventas locales toman secuencias desde `local_state.next_sequence` (2 en
-adelante) en la misma transacción de venta/outbox. El publicador deberá enviar en
-orden y esperar el acuse de la secuencia 1 antes de enviar ventas. El receptor de
-ventas deberá aceptar únicamente `last_sequence + 1`; los huecos no avanzarán el
-cursor. Esta etapa no incorpora recepción de ventas ni simula ese flujo.
+adelante) en la misma transacción de venta/outbox. El publicador envía en orden y espera el acuse de la secuencia 1 antes de ventas.
+El receptor acepta únicamente `last_sequence + 1`; los huecos no avanzan el cursor.
 
 ## Arranque, migraciones y concurrencia
 
@@ -174,4 +171,20 @@ histórico, secuencia, evento `sale.created` y clave se confirman juntos; errore
 revierte la transacción. Ante SQLITE_BUSY o SQLITE_LOCKED se reintenta toda la
 operación hasta tres veces con espera progresiva; cada intento respeta el
 `busy_timeout` de cinco segundos. La fecha comercial usa America/Guayaquil y
-el instante de evento es UTC. La outbox permanece pendiente de transporte.
+el instante de evento es UTC. El publicador procesa la outbox de forma asíncrona.
+
+## Sincronización implementada
+
+El sobre HTTP incorpora `event_id`, versión, sucursal, secuencia, tipo, fecha UTC
+y payload original. Se conserva el formato de payload de los eventos existentes.
+El central contrasta sobre y payload; serializa por sucursal con `SELECT FOR
+UPDATE` en PostgreSQL y utiliza inserción con resolución de conflictos únicos para
+deduplicar. El registro de evento, venta y líneas, movimiento de stock y cursor
+se confirman en una transacción. Un identificador reutilizado con datos distintos
+se rechaza y registra. Se responde por evento; un lote no es una transacción global.
+
+El snapshot de secuencia 1 precede a las ventas. El publicador solo marca enviado
+tras un acuse aceptado o duplicado; conserva el evento ante errores y reinicios.
+`sync_control` conserva pausa, error y bloqueo, y el cursor central registra la
+última recepción. Las revisiones Alembic `branch_0002` y `central_0002` agregan
+esos campos. El modo demo requiere habilitación explícita y pausa solo el envío.

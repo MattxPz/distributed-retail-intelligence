@@ -2,6 +2,7 @@
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     Column,
     Date,
@@ -123,4 +124,14 @@ Table(
     Column("branch_id", Integer, ForeignKey("branches.id"), nullable=False, unique=True),
     Column("next_sequence", Integer, nullable=False),
     CheckConstraint("id = 1 AND next_sequence >= 2", name="ck_local_state"),
+)
+
+Table(
+    "sync_control",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("paused", Boolean, nullable=False, server_default="false"),
+    Column("last_error", String(500)),
+    Column("blocked", Boolean, nullable=False, server_default="false"),
+    CheckConstraint("id = 1", name="ck_sync_control_id"),
 )

@@ -182,3 +182,24 @@ def test_missing_idempotency_key_does_not_write(client):
     response = client.post("/sales", json={"lines": [{"product_id": 1, "quantity": 1}]})
     assert response.status_code == 422
     assert snapshot() == before
+
+
+def test_demo_controls_are_explicitly_gated(client):
+    assert client.post("/demo/sync/pause").status_code == 404
+    app.state.demo_sync_enabled = True
+    try:
+        assert client.post("/demo/sync/pause").json()["paused"] is True
+        assert client.get("/health/ready").status_code == 200
+        assert (
+            client.post(
+                "/sales",
+                json={"lines": [{"product_id": 1, "quantity": 1}]},
+                headers={"Idempotency-Key": "paused"},
+            ).status_code
+            == 200
+        )
+        assert client.get("/sync/status").json()["pending"] == 2
+        assert client.post("/demo/sync/resume").json()["paused"] is False
+        assert client.post("/demo/sync/retry").status_code == 200
+    finally:
+        app.state.demo_sync_enabled = False

@@ -98,6 +98,7 @@ Table(
     Column("branch_id", Integer, ForeignKey("branches.id"), primary_key=True),
     Column("last_sequence", Integer, nullable=False),
     Column("snapshot_version", Integer, nullable=False),
+    Column("last_synced_at", DateTime(timezone=True)),
     CheckConstraint("last_sequence >= 0 AND snapshot_version >= 0", name="ck_cursor_values"),
 )
 

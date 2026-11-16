@@ -31,6 +31,8 @@ services:
       target: runtime
     command: uvicorn retail_intelligence.branch.app:app --host 0.0.0.0 --port 8000 --workers 1
     environment:
+      CENTRAL_URL: http://central:8000
+      DEMO_SYNC_ENABLED: "true"
       BRANCH_ID: "1"
       DATABASE_URL: sqlite:////data/branch-1.sqlite3
     volumes: ["branch-1-data:/data"]
@@ -38,6 +40,8 @@ services:
   branch-2:
     <<: *branch
     environment:
+      CENTRAL_URL: http://central:8000
+      DEMO_SYNC_ENABLED: "true"
       BRANCH_ID: "2"
       DATABASE_URL: sqlite:////data/branch-2.sqlite3
     volumes: ["branch-2-data:/data"]
@@ -45,6 +49,8 @@ services:
   branch-3:
     <<: *branch
     environment:
+      CENTRAL_URL: http://central:8000
+      DEMO_SYNC_ENABLED: "true"
       BRANCH_ID: "3"
       DATABASE_URL: sqlite:////data/branch-3.sqlite3
     volumes: ["branch-3-data:/data"]
@@ -57,6 +63,7 @@ services:
     command: streamlit run src/retail_intelligence/dashboard/app.py --server.address 0.0.0.0 --server.port 8501
     environment:
       CENTRAL_URL: http://central:8000
+      DEMO_SYNC_ENABLED: "true"
       BRANCH_1_URL: http://branch-1:8000
       BRANCH_2_URL: http://branch-2:8000
       BRANCH_3_URL: http://branch-3:8000

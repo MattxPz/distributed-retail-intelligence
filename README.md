@@ -6,7 +6,8 @@ MVP excluye pagos, devoluciones y transferencias.
 
 Implementado: API de estado, panel, persistencia local/central, migraciones
 separadas Alembic y seed idempotente. Cada sucursal tiene 100 unidades iniciales
-por producto y su snapshot pendiente en outbox. La API de sucursal registra ventas locales transaccionales; todavía no hay publicador HTTP ni pronósticos.
+por producto y un snapshot inicial en outbox. La API de sucursal registra ventas locales
+transaccionales y las sincroniza por HTTP con el central. Los pronósticos siguen pendientes.
 
 Consulte [arquitectura](docs/architecture.md), [modelo y seed](docs/data-model.md)
 y [progreso](docs/progress.md).
@@ -88,10 +89,9 @@ Fuera de Compose, los mismos comandos requieren variables de proceso:
 `postgresql+psycopg` para central. No comparta un archivo entre sucursales. El CLI
 no carga `.env` automáticamente; Compose lo usa para interpolar sus variables.
 
-El seed central no carga inventario. El servicio interno que aplica snapshots
-está implementado y probado, pero la sincronización por HTTP corresponde a la
-siguiente etapa. El futuro publicador se ejecutará en el único proceso de cada
-sucursal; no se deben aumentar workers ni réplicas sin coordinación adicional.
+El seed central no carga inventario: recibe el snapshot inicial por HTTP desde
+cada sucursal. El publicador se ejecuta en el único proceso de cada sucursal;
+no aumente workers ni réplicas sin coordinación adicional.
 
 ## Ventas locales
 
@@ -112,4 +112,35 @@ Venta, líneas, descuento, clave y evento se confirman juntos; un fallo revierte
 todos los cambios. Los eventos se guardan en orden después del snapshot inicial.
 Las escrituras SQLite se serializan mediante `BEGIN IMMEDIATE` con espera de
 cinco segundos y hasta tres intentos completos ante bloqueos; si persiste el
-bloqueo se responde 503. La sincronización HTTP sigue pendiente.
+bloqueo se responde 503. La sincronización ocurre de forma asíncrona.
+
+## Sincronización y demo local
+
+Compose configura `CENTRAL_URL=http://central:8000` y habilita explícitamente
+`DEMO_SYNC_ENABLED=true` para las sucursales y el panel. Sin `CENTRAL_URL` no
+arranca el publicador; el control demo está deshabilitado por defecto fuera de
+Compose. Use únicamente un worker y una instancia por base SQLite.
+
+El panel muestra pendientes, errores, última secuencia confirmada y última
+actividad recibida por el central. El central considera desactualizada una
+sucursal sin eventos recibidos durante cinco minutos; esto no distingue falta
+de actividad de desconexión. Para actualizar manualmente, recargue el panel.
+Pausar el envío no detiene la API ni SQLite; una solicitud ya en curso puede
+terminar. Reanudar no desbloquea automáticamente un evento inválido. Revise el
+error y corrija su causa antes de usar el botón de reintento, que vuelve a probar
+el mismo evento sin descartarlo.
+
+Endpoints de sucursal: `GET /sync/status` y, solo con la demo habilitada,
+`POST /demo/sync/pause`, `/demo/sync/resume` y `/demo/sync/retry`. Central:
+`GET /sync/status` y `POST /sync/events`. El lote tiene `events` (1 a 100); cada
+evento lleva `event_id`, `schema_version`, `branch_id`, `sequence`,
+`occurred_at`, `event_type` y `payload`. La respuesta contiene un resultado por
+evento: `accepted` o `duplicate` confirman ese evento; `gap` y `temporary` son
+reintentables; `invalid` y `conflict` requieren intervención. Un lote puede
+confirmar parcialmente y cada evento se confirma en su propia transacción.
+
+El envío es al menos una vez, con timeout de 5 segundos y espera exponencial
+con jitter acotado. Un acuse perdido provoca un duplicado seguro. Un hueco no
+adelanta el cursor: si la secuencia faltante existe en la outbox local, se
+vuelve a poner pendiente desde ella; si no existe, se bloquea para intervención.
+Nunca se borran eventos pendientes. No se promete entrega exactly-once.

@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -7,6 +9,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from sqlalchemy import select
 
 from retail_intelligence.branch.models import metadata
+from retail_intelligence.branch.publisher import run_publisher, status
 from retail_intelligence.branch.sales import SaleInput, create_sale, load_sale
 from retail_intelligence.shared.bootstrap import initialize
 from retail_intelligence.shared.config import BranchSettings
@@ -22,8 +25,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         initialize(engine, "branch", settings.branch_id)
         app.state.engine = engine
         app.state.branch_id = settings.branch_id
+        app.state.demo_sync_enabled = settings.demo_sync_enabled
+        stop = asyncio.Event()
+        task = (
+            asyncio.create_task(run_publisher(engine, settings.central_url, stop))
+            if settings.central_url
+            else None
+        )
         logger.info("Branch %s started", settings.branch_id)
-        yield
+        try:
+            yield
+        finally:
+            stop.set()
+            if task:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
 
 app = FastAPI(title="Branch API", lifespan=lifespan)
@@ -94,3 +110,25 @@ def sale(request: Request, sale_id: str) -> dict[str, Any]:
         ):
             raise HTTPException(404, "Sale not found")
         return load_sale(connection, sale_id)
+
+
+@app.get("/sync/status")
+def sync_status(request: Request) -> dict[str, Any]:
+    return status(request.app.state.engine)
+
+
+@app.post("/demo/sync/{action}")
+def demo_sync(request: Request, action: str) -> dict[str, Any]:
+    if not request.app.state.demo_sync_enabled:
+        raise HTTPException(404, "Demo disabled")
+    if action not in ("pause", "resume", "retry"):
+        raise HTTPException(404, "Unknown action")
+    table = metadata.tables["sync_control"]
+    with request.app.state.engine.begin() as c:
+        values = (
+            {"blocked": False, "last_error": None}
+            if action == "retry"
+            else {"paused": action == "pause"}
+        )
+        c.execute(table.update().where(table.c.id == 1).values(**values))
+    return status(request.app.state.engine)

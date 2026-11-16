@@ -28,6 +28,8 @@ def pytest_generate_tests(metafunc):
             "test_snapshot_projection_deduplication_and_old_snapshot": ["central"],
             "test_snapshot_failure_does_not_leave_partial_projection": ["central"],
             "test_concurrent_snapshot_delivery": ["central"],
+            "test_event_receiver_end_to_end": ["central"],
+            "test_http_loss_replay_and_partial_batch": ["central"],
             "test_local_outbox_is_the_source_of_central_inventory": ["central"],
         }
         metafunc.parametrize(
@@ -86,7 +88,7 @@ def test_new_database_second_run_and_no_stock_replenishment(database):
         assert connection.scalar(text("SELECT price_cents FROM products WHERE id=1")) == 999
         assert connection.scalar(text("SELECT count(*) FROM products")) == 10
         assert connection.scalar(text("SELECT count(*) FROM branches")) == 3
-        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == role + "_0001"
+        assert connection.scalar(text("SELECT version_num FROM alembic_version")) == role + "_0002"
         if role == "branch":
             assert (
                 connection.scalar(text("SELECT quantity FROM inventory WHERE product_id=1")) == 97
@@ -317,3 +319,174 @@ def test_local_outbox_is_the_source_of_central_inventory(database, tmp_path):
         assert (
             connection.scalar(text("SELECT last_sequence FROM sync_cursors WHERE branch_id=1")) == 0
         )
+
+
+def test_event_receiver_end_to_end(database, tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy import event
+
+    from retail_intelligence.branch.sales import SaleInput, create_sale
+    from retail_intelligence.central.receiver import EventError, process_event
+
+    role, central = database
+    init(role, central)
+    with database_engine(f"sqlite:///{(tmp_path / 'source-sync.sqlite3').as_posix()}") as branch:
+        bootstrap.initialize(branch, "branch", 1)
+        create_sale(
+            branch,
+            1,
+            "key",
+            SaleInput.model_validate({"lines": [{"product_id": 1, "quantity": 2}]}),
+        )
+        with branch.connect() as c:
+            events = (
+                c.execute(
+                    select(branch_metadata.tables["outbox"].c.payload).order_by(
+                        branch_metadata.tables["outbox"].c.sequence
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        with pytest.raises(EventError, match="expected sequence 1") as exc:
+            process_event(central, events[1])
+        assert exc.value.retryable
+        with central.connect() as c:
+            assert c.scalar(text("SELECT count(*) FROM processed_events")) == 0
+            assert c.scalar(text("SELECT count(*) FROM projected_stock")) == 0
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            outcomes = list(pool.map(lambda _: process_event(central, events[0]), range(2)))
+        assert sorted(outcomes) == ["accepted", "duplicate"]
+
+        def fail(conn, cursor, statement, parameters, context, executemany):
+            if statement.lstrip().upper().startswith("UPDATE SYNC_CURSORS"):
+                raise RuntimeError("injected before commit")
+
+        event.listen(central, "before_cursor_execute", fail)
+        try:
+            with pytest.raises(RuntimeError, match="before commit"):
+                process_event(central, events[1])
+        finally:
+            event.remove(central, "before_cursor_execute", fail)
+        with central.connect() as c:
+            assert (
+                c.scalar(
+                    text("SELECT quantity FROM projected_stock WHERE branch_id=1 AND product_id=1")
+                )
+                == 100
+            )
+            assert c.scalar(text("SELECT count(*) FROM sales")) == 0
+            assert c.scalar(text("SELECT count(*) FROM processed_events")) == 1
+        assert process_event(central, events[1]) == "accepted"
+        assert process_event(central, events[1]) == "duplicate"
+        changed = dict(events[1], total_cents=999)
+        with pytest.raises(EventError):
+            process_event(central, changed)
+        bootstrap.initialize(central, "central")
+        assert process_event(central, events[1]) == "duplicate"
+        with central.connect() as c:
+            assert (
+                c.scalar(
+                    text("SELECT quantity FROM projected_stock WHERE branch_id=1 AND product_id=1")
+                )
+                == 98
+            )
+            assert c.scalar(text("SELECT count(*) FROM sales")) == 1
+            assert c.scalar(text("SELECT count(*) FROM sale_lines")) == 1
+            assert c.scalar(text("SELECT count(*) FROM processed_events")) == 2
+            assert c.scalar(text("SELECT last_sequence FROM sync_cursors WHERE branch_id=1")) == 2
+
+
+def test_http_loss_replay_and_partial_batch(database, tmp_path):
+    import asyncio
+    import json
+
+    import httpx
+
+    from retail_intelligence.branch.publisher import publish_once, status
+    from retail_intelligence.branch.sales import SaleInput, create_sale
+    from retail_intelligence.central.app import app as central_app
+
+    role, central = database
+    init(role, central)
+    central_app.state.engine = central
+    with database_engine(f"sqlite:///{(tmp_path / 'http-branch.sqlite3').as_posix()}") as branch:
+        bootstrap.initialize(branch, "branch", 1)
+        create_sale(
+            branch,
+            1,
+            "sale",
+            SaleInput.model_validate({"lines": [{"product_id": 1, "quantity": 2}]}),
+        )
+
+        class LostFirstResponse(httpx.AsyncBaseTransport):
+            def __init__(self):
+                self.inner = httpx.ASGITransport(app=central_app)
+                self.first = True
+
+            async def handle_async_request(self, request):
+                response = await self.inner.handle_async_request(request)
+                if self.first:
+                    self.first = False
+                    await response.aclose()
+                    raise httpx.ReadTimeout("response lost after commit", request=request)
+                return response
+
+        async def scenario():
+            async with httpx.AsyncClient(transport=LostFirstResponse()) as client:
+                assert await publish_once(branch, "http://central", client) == "retry"
+                assert status(branch)["pending"] == 2
+                assert await publish_once(branch, "http://central", client) == "sent"
+                assert await publish_once(branch, "http://central", client) == "sent"
+                assert status(branch)["pending"] == 0
+                assert status(branch)["last_confirmed_sequence"] == 2
+                with branch.connect() as c:
+                    events = (
+                        c.execute(
+                            select(branch_metadata.tables["outbox"].c.payload).order_by(
+                                branch_metadata.tables["outbox"].c.sequence
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                changed = json.loads(json.dumps(events[1]))
+                changed["lines"][0]["unit_price_cents"] += 1
+                changed["total_cents"] += changed["lines"][0]["quantity"]
+
+                def envelope(payload):
+                    return {
+                        "event_id": payload["id"],
+                        "branch_id": payload["branch_id"],
+                        "sequence": payload["sequence"],
+                        "schema_version": payload["schema_version"],
+                        "occurred_at": payload["occurred_at"],
+                        "event_type": payload["event_type"],
+                        "payload": payload,
+                    }
+
+                response = await client.post(
+                    "http://central/sync/events",
+                    json={"events": [envelope(events[0]), envelope(changed), envelope(events[1])]},
+                )
+                assert [item["status"] for item in response.json()["results"]] == [
+                    "duplicate",
+                    "conflict",
+                    "duplicate",
+                ]
+                central_state = await client.get("http://central/sync/status")
+                assert central_state.status_code == 200
+                assert central_state.json()[0]["last_sequence"] == 2
+                assert central_state.json()[0]["stale"] is False
+
+        asyncio.run(scenario())
+        with central.connect() as c:
+            assert (
+                c.scalar(
+                    text("SELECT quantity FROM projected_stock WHERE branch_id=1 AND product_id=1")
+                )
+                == 98
+            )
+            assert c.scalar(text("SELECT count(*) FROM sales")) == 1
+            assert c.scalar(text("SELECT count(*) FROM processed_events")) == 2
