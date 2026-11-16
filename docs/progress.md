@@ -67,3 +67,12 @@ Siguiente etapa: API de ventas transaccionales e idempotencia operativa; posteri
 - Ruff y mypy correctos; suite completa en imagen de pruebas existente y código montado en solo lectura: 58 aprobadas, PostgreSQL 17 real y SQLite real. Advertencias de deprecación de Starlette TestClient y adaptador datetime SQLite de pruebas.
 - Prueba HTTP de extremo a extremo con contenedores y bases temporales aisladas: snapshot, pausa, venta local, reanudación, stock central 98 y una venta. Pruebas adicionales cubren duplicados concurrentes, rollback anterior al commit, respuesta perdida tras commit, huecos, contenido incompatible y reenvío tras reabrir base.
 - Contenedores temporales de pruebas detenidos y eliminados; no se reconstruyeron ni arrancaron los servicios del proyecto. Para ejecutar el código nuevo use docker compose up --build -d.
+
+
+## Demo offline y fallo de transporte — 2026-11-16
+
+- Implementado `uv run python -m retail_intelligence.cli demo-offline`: identificador único, comprobación relativa al estado inicial, ventas locales, pausa persistente, reinicio de sucursal 2, convergencia y reenvío de los cuatro eventos. Compara existencias, cantidades, importes, eventos procesados y cursores. Reanuda la sucursal si una ejecución falla después de iniciar la pausa.
+- Prueba `RUN_DEMO_E2E=1 uv run pytest -s -q tests/test_demo_e2e.py`: aprobada en PostgreSQL real y SQLite en Compose aislado; se ejecutó la demo dos veces sobre la misma base. Los recursos temporales de nombre único se eliminaron al terminar, sin tocar volúmenes del usuario.
+- Evidencia de la primera ejecución: sucursal 2 pasó de stock 100/ventas 0/total 0 a stock local 98/ventas 2/300 centavos mientras el central seguía en 100/0/0 y había dos pendientes. Tras reiniciar y reanudar, central y sucursal coincidieron en 98/2/300; cuatro eventos reenviados fueron duplicados sin cambiar proyecciones ni cursores. Sucursales 1 y 3 vendieron y sincronizaron una unidad cada una.
+- La segunda ejecución partió de sucursal 2 con stock 97/3 ventas/450 centavos (incluida la venta de la prueba de red) y convergió en 95/5/750. El proxy cerró realmente conexiones HTTP; la sucursal permaneció viva y la venta pendiente convergió al restablecer el transporte.
+- Caso de fallo verificado: sucursal 1 inaccesible y plazo de 0,1 segundos produce salida 1 sin éxito. Ruff, formato y mypy correctos; pytest local: 39 aprobadas, 20 omitidas por requerir PostgreSQL o habilitación e2e, y dos advertencias de deprecación conocidas.

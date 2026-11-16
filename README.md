@@ -144,3 +144,42 @@ con jitter acotado. Un acuse perdido provoca un duplicado seguro. Un hueco no
 adelanta el cursor: si la secuencia faltante existe en la outbox local, se
 vuelve a poner pendiente desde ella; si no existe, se bloquea para intervención.
 Nunca se borran eventos pendientes. No se promete entrega exactly-once.
+
+
+## Demo offline reproducible
+
+Con Docker Desktop y los servicios actuales en ejecución, desde la raíz:
+
+```powershell
+docker compose up --build -d
+uv run python -m retail_intelligence.cli demo-offline
+```
+
+La demo crea **cuatro ventas reales** identificadas por ejecución en las bases
+existentes: dos en sucursal 2 y una en cada una de las sucursales 1 y 3. No
+elimina datos; consume dos unidades del producto 1 en la sucursal 2 y una en cada
+una de las otras. Requiere existencias suficientes, publicadores activos, demo
+habilitada en sucursales y ausencia de otras escrituras durante las mediciones.
+Espera la sincronización, pausa solo el publicador 2, reinicia ese contenedor
+con su volumen, reanuda y reenvía los cuatro eventos. Muestra estado antes,
+durante y después; termina con código distinto de cero si falla. Intenta
+reanudar la sucursal si se interrumpe después de pausar.
+
+El botón y la demo anterior **pausan el publicador**; no interrumpen la red. La
+prueba e2e adicional usa un proxy HTTP local que cierra la conexión de la
+sucursal 2 sin responder, mientras su API y SQLite siguen vivas. La prueba crea un proyecto
+Compose de nombre único y elimina únicamente sus propios contenedores y
+volúmenes. Requiere Docker, uv y las imágenes `postgres:17` y
+`distributed-retail-intelligence-tests:0.1.0`; esta última se puede construir
+con `docker compose -f compose.test.yaml build tests`. Para ejecutarla:
+
+```powershell
+$env:RUN_DEMO_E2E = "1"
+uv run pytest -s -q tests/test_demo_e2e.py
+Remove-Item Env:RUN_DEMO_E2E
+```
+
+La prueba ejecuta la demo dos veces sobre la misma base aislada, comprueba
+cursores, conteos, importes y stock antes y después del reenvío, y verifica la
+recuperación tras el fallo real del proxy. Los servicios de prueba no acceden a
+los volúmenes del proyecto del usuario.

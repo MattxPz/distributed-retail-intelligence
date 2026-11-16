@@ -8,10 +8,19 @@ from retail_intelligence.shared.health import database_engine
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["init"])
-    parser.add_argument("role", choices=["branch", "central"])
+    parser.add_argument("command", choices=["init", "demo-offline"])
+    parser.add_argument("role", nargs="?", choices=["branch", "central"])
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
+    if args.command == "demo-offline":
+        if args.role is not None:
+            parser.error("demo-offline does not take a role")
+        from retail_intelligence.demo_offline import run_demo
+
+        run_demo()
+        return
+    if args.role is None:
+        parser.error("init requires branch or central")
     if args.role == "branch":
         branch = BranchSettings()  # type: ignore[call-arg]
         with database_engine(branch.database_url) as engine:
