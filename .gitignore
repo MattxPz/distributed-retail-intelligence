@@ -19,7 +19,7 @@ htmlcov/
 data/generated/
 artifacts/
 models/
-docs/progress.md
+# docs/progress.md
 AGENTS.md
 # Artefactos de empaquetado
 build/
